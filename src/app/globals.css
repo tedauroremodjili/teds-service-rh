@@ -1,26 +1,491 @@
 @import "tailwindcss";
 
+/*
+ * ---------------------------------------------------------------------------
+ * TED'S SERVICE — Design System
+ * ---------------------------------------------------------------------------
+ * Palette extraite du logo (public/logo.jpeg) :
+ *   - Bleu marine  #123A6B  -> texte « Ted's », couverture du livre
+ *   - Bleu vif     #2B7CC9  -> globe, ecran, circuits
+ *   - Orange       #F07D1A  -> texte « Service », bulle de dialogue
+ *
+ * Tailwind v4 : plus de fichier tailwind.config.js. Tout le theme est declare
+ * ici avec la directive @theme, et chaque variable genere automatiquement les
+ * classes utilitaires correspondantes (bg-primary-600, text-accent-500, ...).
+ * ---------------------------------------------------------------------------
+ */
+
+@theme {
+  /* --- Bleu Ted's (couleur primaire) ------------------------------------ */
+  --color-primary-50: #eff6fd;
+  --color-primary-100: #dbeafb;
+  --color-primary-200: #bfdbf7;
+  --color-primary-300: #93c4ef;
+  --color-primary-400: #60a5e4;
+  --color-primary-500: #3b85d3;
+  --color-primary-600: #2b7cc9;
+  --color-primary-700: #1e5296;
+  --color-primary-800: #1a4480;
+  --color-primary-900: #123a6b;
+  --color-primary-950: #0c2749;
+
+  /* --- Orange Service (couleur d'accent) -------------------------------- */
+  --color-accent-50: #fef6ec;
+  --color-accent-100: #fde9cf;
+  --color-accent-200: #fad09e;
+  --color-accent-300: #f7b267;
+  --color-accent-400: #f4953c;
+  --color-accent-500: #f07d1a;
+  --color-accent-600: #d96410;
+  --color-accent-700: #b44b0f;
+  --color-accent-800: #903c14;
+  --color-accent-900: #763314;
+  --color-accent-950: #401706;
+
+  /* --- Neutres (gris legerement bleutes, coherents avec la marque) ------- */
+  --color-surface-50: #f8fafc;
+  --color-surface-100: #f1f5f9;
+  --color-surface-200: #e2e8f0;
+  --color-surface-300: #cbd5e1;
+  --color-surface-400: #94a3b8;
+  --color-surface-500: #64748b;
+  --color-surface-600: #475569;
+  --color-surface-700: #334155;
+  --color-surface-800: #1e293b;
+  --color-surface-900: #0f172a;
+
+  /* --- Couleurs semantiques (statuts metier) ---------------------------- */
+  --color-success-50: #ecfdf5;
+  --color-success-100: #d1fae5;
+  --color-success-500: #10b981;
+  --color-success-700: #047857;
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-500: #f59e0b;
+  --color-warning-700: #b45309;
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-500: #ef4444;
+  --color-danger-700: #b91c1c;
+  --color-info-50: #eff6ff;
+  --color-info-100: #dbeafe;
+  --color-info-500: #3b82f6;
+  --color-info-700: #1d4ed8;
+
+  /* --- Typographie ------------------------------------------------------ */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* --- Ombres douces pour les cartes du back-office --------------------- */
+  --shadow-card: 0 1px 2px 0 rgb(18 58 107 / 0.05), 0 1px 3px 0 rgb(18 58 107 / 0.08);
+  --shadow-card-hover: 0 4px 12px -2px rgb(18 58 107 / 0.12), 0 2px 6px -2px rgb(18 58 107 / 0.08);
+  --shadow-sidebar: 2px 0 12px -4px rgb(12 39 73 / 0.25);
+}
+
+/* ---------------------------------------------------------------------------
+ * Base
+ * ------------------------------------------------------------------------ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: var(--color-surface-100);
+  --foreground: var(--color-surface-800);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+/* Anneau de focus unifie : accessibilite clavier sur toute l'application. */
+*:focus-visible {
+  outline: 2px solid var(--color-primary-600);
+  outline-offset: 2px;
+}
+
+/* Barre de defilement discrete, aux teintes de la marque. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-300);
+  border-radius: 9999px;
+  border: 2px solid var(--color-surface-100);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface-400);
+}
+
+/* ---------------------------------------------------------------------------
+ * Utilitaires personnalises
+ * ------------------------------------------------------------------------ */
+
+/* Degrade signature repris du logo (bleu marine -> bleu vif). */
+@utility bg-brand-gradient {
+  background-image: linear-gradient(
+    135deg,
+    var(--color-primary-900) 0%,
+    var(--color-primary-700) 55%,
+    var(--color-primary-600) 100%
+  );
+}
+
+/* Degrade d'accent pour les elements mis en avant. */
+@utility bg-accent-gradient {
+  background-image: linear-gradient(
+    135deg,
+    var(--color-accent-600) 0%,
+    var(--color-accent-500) 100%
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Impression et export PDF
+ * ---------------------------------------------------------------------------
+ * Le PDF de l'application est produit par le navigateur : « Imprimer » puis
+ * « Enregistrer au format PDF ». La consequence est simple et vaut d'etre
+ * retenue — la mise en page ci-dessous est la SEULE, elle sert au papier comme
+ * au fichier, et il n'existe donc aucun risque de voir un PDF differer de ce
+ * qui sort de l'imprimante.
+ *
+ * Trois utilitaires sont a la disposition des vues :
+ *   .no-print          l'element disparait du papier (navigation, boutons) ;
+ *   .print-only        l'element n'existe QUE sur le papier ;
+ *   .print-avoid-break le bloc ne se coupe pas entre deux pages ;
+ *   .print-break-before / .print-break-after   changement de page force.
+ * ------------------------------------------------------------------------ */
+
+@page {
+  size: A4 portrait;
+  /* Marge basse plus large : elle accueille le pied de page du navigateur. */
+  margin: 12mm 14mm 16mm;
+}
+
+/* Page nommee : un etat a beaucoup de colonnes s'imprime en paysage. */
+@page landscape {
+  size: A4 landscape;
+  margin: 12mm 14mm 16mm;
+}
+
+.print-landscape {
+  page: landscape;
+}
+
+.print-only,
+.print-page-letterhead {
+  display: none;
+}
+
+/*
+ * Feuille A4.
+ *
+ * A l'ecran, elle prend les dimensions du papier : l'apercu est alors fidele,
+ * et une coupure de page se voit avant d'avoir gache une feuille. A
+ * l'impression, la page EST la feuille — largeur, marges et ombre disparaissent
+ * au profit de `@page`.
+ */
+.print-sheet {
+  width: 210mm;
+  min-height: 297mm;
+  margin-inline: auto;
+  padding: 14mm;
+  background: #fff;
+  color: var(--color-surface-800);
+  box-shadow: var(--shadow-card-hover);
+  border: 1px solid var(--color-surface-200);
+  border-radius: 2px;
+}
+
+.print-sheet.print-landscape {
+  width: 297mm;
+  min-height: 210mm;
+}
+
+/* En dessous d'une feuille de large, on rend la feuille elastique plutot que
+   de laisser la page defiler lateralement sur un telephone. */
+@media (max-width: 240mm) {
+  .print-sheet,
+  .print-sheet.print-landscape {
+    width: 100%;
+    min-height: 0;
+    padding: 6mm;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Apparition au defilement (page vitrine)
+ * ---------------------------------------------------------------------------
+ * Le contenu est VISIBLE par defaut. L'animation ne fait que l'amener en
+ * douceur, et seulement la ou le navigateur sait animer sur le defilement.
+ * Aucun JavaScript n'est mobilise, et un navigateur qui ne connait pas
+ * `animation-timeline` affiche simplement la page — jamais un bloc vide qui
+ * attend un script.
+ *
+ * La preference systeme « animations reduites » desactive tout : c'est un
+ * reglage d'accessibilite, pas une suggestion.
+ * ------------------------------------------------------------------------ */
+
+@keyframes apparition {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .reveal {
+      animation: apparition linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 55%;
+    }
+  }
+}
+
+
+/*
+ * Entree de page.
+ *
+ * Depuis que chaque sujet a sa propre page, la navigation remplace le
+ * defilement : sans transition, le changement est brutal. Cette animation ne
+ * dure que le temps d'un battement de cil et ne retarde rien — le contenu est
+ * deja la, il ne fait que se poser.
+ */
+@keyframes entree-page {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .page-enter {
+    animation: entree-page 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Second temps d'une entree en deux parties (texte puis illustration) :
+     un leger decalage suffit a suggerer une sequence sans la rendre lente. */
+  .page-enter-delay {
+    animation: entree-page 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: 120ms;
+  }
+}
+
+/*
+ * Halos ambiants.
+ *
+ * Les taches de couleur floues qui accompagnent les bandeaux d'ouverture
+ * etaient parfaitement immobiles : correct, mais inerte. Un mouvement tres
+ * lent et tres ample (30s+) suffit a donner une impression de vie sans
+ * jamais attirer l'oeil pour de bon — l'effet inverse d'une animation qu'on
+ * remarque. `will-change` evite que Safari ne recalcule le flou a chaque
+ * image.
+ */
+@keyframes derive-halo {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(3%, -4%) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .halo-float {
+    animation: derive-halo 22s ease-in-out infinite;
+    will-change: transform;
+  }
+}
+
+/*
+ * Lueur ponctuee.
+ *
+ * Reservee a UN element par page au plus : le point qui dit « en direct » sur
+ * la vitrine, la derniere etape d'un parcours. Une pastille qui respire fait
+ * ce travail mieux qu'une couleur fixe, à condition de rester rare.
+ *
+ * `filter: drop-shadow` plutot que `box-shadow` : plusieurs elements anime
+ * (l'icone de la derniere etape du parcours) portent deja un anneau Tailwind
+ * construit avec `box-shadow` — l'animer aurait efface l'anneau a chaque
+ * image plutot que de s'y ajouter.
+ */
+@keyframes respire {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 color-mix(in srgb, var(--color-accent-500) 55%, transparent));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--color-accent-500) 0%, transparent));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-glow {
+    animation: respire 2.4s ease-out infinite;
+  }
+}
+
+@media print {
+  /*
+   * Conserver les aplats de la marque.
+   *
+   * Par defaut, les navigateurs suppriment couleurs de fond et images a
+   * l'impression pour economiser l'encre. Un bandeau de tableau blanc sur blanc
+   * et un cartouche sans son filet rendent la piece illisible : on demande donc
+   * explicitement le rendu fidele.
+   */
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    box-shadow: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    /* 10,5 pt : la densite d'un document administratif, pas d'un ecran. */
+    font-size: 10.5pt;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: revert !important;
+  }
+
+  /* Le bandeau des pages ordinaires est une rangee, pas un bloc. */
+  .print-page-letterhead {
+    display: flex;
+  }
+
+  /*
+   * ... sauf devant une piece dediee : celle-ci porte deja son propre papier a
+   * en-tete, et deux en-tetes empiles sur la meme feuille font desordre.
+   */
+  body:has(.print-sheet) .print-page-letterhead {
+    display: none !important;
+  }
+
+  /*
+   * Neutraliser la coquille du back-office.
+   *
+   * Sa gouttiere de navigation (`lg:pl-[19rem]`) et les marges de la zone de
+   * contenu se retrouveraient sinon en marge de gauche du papier, decalant tout
+   * le document de cinq centimetres.
+   */
+  [data-app-shell] {
+    padding-left: 0 !important;
+  }
+
+  [data-app-content] {
+    padding: 0 !important;
+  }
+
+  /* Un element fixe ou collant se repete sur chaque page ou masque le contenu. */
+  .fixed,
+  .sticky {
+    position: static !important;
+  }
+
+  /* Un conteneur a defilement tronque son contenu sur le papier : le papier
+     n'a pas de barre de defilement. */
+  .overflow-x-auto,
+  .overflow-y-auto,
+  .overflow-auto,
+  .overflow-hidden {
+    overflow: visible !important;
+  }
+
+  /* La largeur minimale des tableaux d'ecran deborde de la feuille. */
+  table {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  /* L'en-tete de colonnes se repete en haut de chaque page, et le pied de
+     totaux en bas : c'est ce qui rend un etat de deux cents lignes lisible. */
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  /* Rien ne se coupe au milieu : ni une ligne de tableau, ni une image. */
+  tr,
+  img,
+  svg {
+    break-inside: avoid;
+  }
+
+  /* Un titre seul en bas de page est un titre perdu. */
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  p,
+  li {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Les liens du back-office sont des reperes de navigation ; sur papier, ils
+     ne doivent etre ni bleus ni soulignes. */
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .print-sheet {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* Deux pieces a la suite s'impriment sur deux feuilles. */
+  .print-sheet + .print-sheet {
+    break-before: page;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+
+  .print-break-before {
+    break-before: page;
+  }
+
+  .print-break-after {
+    break-after: page;
+  }
 }

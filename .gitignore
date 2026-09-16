@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...mais le modele doit etre versionne : il documente les variables attendues.
+!.env.example
+
+# client Prisma genere : reconstruit par `npm run db:generate`, jamais commite
+/src/infrastructure/database/generated/
 
 # vercel
 .vercel

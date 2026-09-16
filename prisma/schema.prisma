@@ -1,0 +1,1539 @@
+// =============================================================================
+// TED'S SERVICE — ERP RH
+// Schema de persistance (MySQL)
+// =============================================================================
+// Ce fichier est la couche INFRASTRUCTURE : il decrit comment les donnees sont
+// stockees, pas les regles metier. Les regles vivent dans src/modules/*/domain.
+// Les modeles sont regroupes par module fonctionnel du cahier des charges.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/infrastructure/database/generated"
+}
+
+// Prisma 7 : l'URL de connexion est declaree dans prisma.config.ts,
+// plus dans ce fichier.
+datasource db {
+  provider = "mysql"
+}
+
+// =============================================================================
+// MODULE 1 — AUTHENTIFICATION, ROLES ET PERMISSIONS (RBAC)
+// =============================================================================
+
+enum UserStatus {
+  ACTIF
+  INACTIF
+  SUSPENDU
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  status       UserStatus @default(ACTIF)
+
+  // Double authentification (optionnelle, module 1).
+  twoFactorEnabled Boolean @default(false) @map("two_factor_enabled")
+  twoFactorSecret  String? @map("two_factor_secret")
+
+  // Limitation des tentatives de connexion (section 7 — securite).
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  lastLoginAt         DateTime? @map("last_login_at")
+
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+
+  roleId String @map("role_id")
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  /// Un utilisateur peut etre rattache a un employe (compte agent).
+  employee Employee?
+
+  /// Droits accordes ou retires a CE compte, en plus de ceux du role.
+  permissions UserPermission[] @relation("UserPermissionHolder")
+  /// Droits que ce compte a accordes a d'autres (tracabilite).
+  grantedPermissions UserPermission[] @relation("UserPermissionGrantedBy")
+
+  loginHistory LoginHistory[]
+  auditLogs    AuditLog[]
+  notifications Notification[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([roleId])
+  @@index([status])
+  @@map("users")
+}
+
+model Role {
+  id String @id @default(cuid())
+
+  /// Identifiant technique, en majuscules (SUPER_ADMIN, RESPONSABLE_CAISSE).
+  /// Texte libre et non plus enumeration : les roles se creent depuis /roles,
+  /// et une enumeration PostgreSQL aurait exige une migration a chaque ajout.
+  name        String  @unique
+  label       String
+  description String?
+  /// Un role systeme (les 8 du cahier des charges) ne peut pas etre supprime.
+  isSystem    Boolean @default(true) @map("is_system")
+
+  users       User[]
+  permissions RolePermission[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("roles")
+}
+
+/// Permission au format "module.action" (ex : employees.create, payroll.validate).
+model Permission {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  module      String
+  action      String
+  description String?
+
+  roles RolePermission[]
+  users UserPermission[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  grantedAt DateTime @default(now()) @map("granted_at")
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Permission attribuee (ou retiree) a UN utilisateur precis.
+///
+/// Le role donne le socle ; cette table exprime l'ecart pour un compte donne :
+/// « ce commercial-la peut aussi valider les paiements », « ce comptable-la ne
+/// peut plus payer les salaires ». On ne stocke que l'ecart, jamais la liste
+/// complete : ainsi une evolution de la matrice des roles profite
+/// automatiquement a tous les comptes concernes.
+model UserPermission {
+  userId       String @map("user_id")
+  permissionId String @map("permission_id")
+
+  /// true  = accordee EN PLUS du role.
+  /// false = retiree MALGRE le role (le refus l'emporte toujours).
+  granted Boolean @default(true)
+
+  /// Qui a attribue ce droit, et quand — le module 1 exige la tracabilite.
+  grantedById String?   @map("granted_by_id")
+  grantedBy   User?     @relation("UserPermissionGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  grantedAt   DateTime  @default(now()) @map("granted_at")
+  /// Droit temporaire : au-dela de cette date il n'est plus pris en compte.
+  expiresAt   DateTime? @map("expires_at")
+
+  user       User       @relation("UserPermissionHolder", fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+  @@map("user_permissions")
+}
+
+/// Historique des connexions (module 1).
+model LoginHistory {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email     String
+  success   Boolean
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("login_history")
+}
+
+/// Journalisation de toutes les actions sensibles (section 7 — audit log).
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  /// Etat avant / apres, serialise en JSON.
+  before     Json?
+  after      Json?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+// =============================================================================
+// MODULE 2 — EMPLOYES
+// =============================================================================
+
+enum Gender {
+  MASCULIN
+  FEMININ
+}
+
+enum MaritalStatus {
+  CELIBATAIRE
+  MARIE
+  DIVORCE
+  VEUF
+}
+
+enum EmployeeStatus {
+  ACTIF
+  SUSPENDU
+  CONGE
+  DEMISSIONNE
+  LICENCIE
+  RETRAITE
+}
+
+enum EmployeeDocumentType {
+  CV
+  DIPLOME
+  CONTRAT
+  PIECE_IDENTITE
+  PHOTO
+  AUTRE
+}
+
+model Department {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  description String?
+
+  positions Position[]
+  employees Employee[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@map("departments")
+}
+
+model Position {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  title       String
+  description String?
+  /// Salaire de reference du poste, en FCFA.
+  baseSalary  Decimal @default(0) @db.Decimal(14, 2) @map("base_salary")
+
+  departmentId String?     @map("department_id")
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  employees Employee[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([departmentId])
+  @@map("positions")
+}
+
+model Employee {
+  id String @id @default(cuid())
+
+  // --- Informations personnelles ---
+  matricule     String        @unique
+  firstName     String        @map("first_name")
+  lastName      String        @map("last_name")
+  gender        Gender
+  birthDate     DateTime      @map("birth_date")
+  birthPlace    String?       @map("birth_place")
+  nationality   String        @default("Congolaise")
+  maritalStatus MaritalStatus @default(CELIBATAIRE) @map("marital_status")
+  address       String?
+  phone         String
+  email         String        @unique
+  photoUrl      String?       @map("photo_url")
+
+  // --- Informations professionnelles ---
+  hireDate       DateTime       @map("hire_date")
+  departmentId   String?        @map("department_id")
+  department     Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  positionId     String?        @map("position_id")
+  position       Position?      @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  /// Salaire de base mensuel en FCFA.
+  baseSalary     Decimal        @db.Decimal(14, 2) @map("base_salary")
+  /// Taux de commission par defaut de l'agent, en pourcentage (ex : 10.00).
+  commissionRate Decimal        @default(0) @db.Decimal(5, 2) @map("commission_rate")
+  status         EmployeeStatus @default(ACTIF)
+
+  // --- Compte utilisateur associe ---
+  userId String? @unique @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // --- Relations ---
+  documents        EmployeeDocument[]
+  remunerationRules RemunerationRule[]
+  contracts        Contract[]
+  attendances      Attendance[]
+  leaves           Leave[]
+  payrolls         Payroll[]
+  commissions      Commission[]
+  documentSales    DocumentSale[]
+  serviceOrders    ServiceOrder[]
+  registrations    StudentRegistration[]
+  trainings        Training[]
+  cashTransactions CashTransaction[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([status])
+  @@index([departmentId])
+  @@index([lastName, firstName])
+  @@map("employees")
+}
+
+model EmployeeDocument {
+  id         String               @id @default(cuid())
+  employeeId String               @map("employee_id")
+  employee   Employee             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type       EmployeeDocumentType
+  label      String
+  fileUrl    String               @map("file_url")
+  fileSize   Int?                 @map("file_size")
+  mimeType   String?              @map("mime_type")
+  expiresAt  DateTime?            @map("expires_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([employeeId, type])
+  @@map("employee_documents")
+}
+
+// =============================================================================
+// MODULE 3 — CONTRATS
+// =============================================================================
+
+enum ContractType {
+  CDI
+  CDD
+  STAGE
+  PRESTATION
+  ESSAI
+  APPRENTISSAGE
+}
+
+enum ContractStatus {
+  BROUILLON
+  ACTIF
+  SUSPENDU
+  RENOUVELE
+  EXPIRE
+  RESILIE
+}
+
+model Contract {
+  id         String   @id @default(cuid())
+  reference  String   @unique
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  type      ContractType
+  status    ContractStatus @default(BROUILLON)
+  startDate DateTime       @map("start_date")
+  /// Null pour un CDI.
+  endDate   DateTime?      @map("end_date")
+
+  baseSalary Decimal @db.Decimal(14, 2) @map("base_salary")
+  /// Duree de la periode d'essai, en mois.
+  trialMonths Int?   @map("trial_months")
+  workingHoursPerWeek Int @default(40) @map("working_hours_per_week")
+
+  documentUrl String? @map("document_url")
+  notes       String?
+
+  // --- Cycle de vie ---
+  signedAt      DateTime? @map("signed_at")
+  suspendedAt   DateTime? @map("suspended_at")
+  terminatedAt  DateTime? @map("terminated_at")
+  terminationReason String? @map("termination_reason")
+
+  /// Contrat precedent, en cas de renouvellement.
+  previousContractId String?    @unique @map("previous_contract_id")
+  previousContract   Contract?  @relation("ContractRenewal", fields: [previousContractId], references: [id], onDelete: SetNull)
+  renewal            Contract?  @relation("ContractRenewal")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeId, status])
+  @@index([endDate])
+  @@map("contracts")
+}
+
+// =============================================================================
+// MODULE 4 — PRESENCES ET CONGES
+// =============================================================================
+
+enum AttendanceStatus {
+  PRESENT
+  RETARD
+  ABSENT
+  ABSENCE_JUSTIFIEE
+  CONGE
+  AUTORISATION
+  MISSION
+  FERIE
+}
+
+enum LeaveType {
+  ANNUEL
+  MALADIE
+  MATERNITE
+  PATERNITE
+  SANS_SOLDE
+  EXCEPTIONNEL
+  AUTORISATION
+}
+
+enum LeaveStatus {
+  EN_ATTENTE
+  APPROUVE
+  REFUSE
+  ANNULE
+}
+
+model Attendance {
+  id         String   @id @default(cuid())
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  /// Jour concerne, normalise a minuit.
+  date     DateTime         @db.Date
+  checkIn  DateTime?        @map("check_in")
+  checkOut DateTime?        @map("check_out")
+  status   AttendanceStatus @default(PRESENT)
+
+  /// Minutes de retard, calculees a partir de l'heure d'arrivee theorique.
+  lateMinutes Int @default(0) @map("late_minutes")
+  /// Minutes travaillees au-dela de l'horaire, base des heures supplementaires.
+  overtimeMinutes Int @default(0) @map("overtime_minutes")
+
+  notes       String?
+  recordedById String? @map("recorded_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Un seul pointage par employe et par jour.
+  @@unique([employeeId, date])
+  @@index([date])
+  @@map("attendance")
+}
+
+model Leave {
+  id         String   @id @default(cuid())
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  type      LeaveType
+  status    LeaveStatus @default(EN_ATTENTE)
+  startDate DateTime    @map("start_date") @db.Date
+  endDate   DateTime    @map("end_date") @db.Date
+  /// Nombre de jours ouvrables decomptes.
+  daysCount Int         @map("days_count")
+  reason    String?
+
+  approvedById String?   @map("approved_by_id")
+  approvedAt   DateTime? @map("approved_at")
+  rejectionReason String? @map("rejection_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeId, status])
+  @@index([startDate, endDate])
+  @@map("leaves")
+}
+
+// =============================================================================
+// MODULES 5 & 6 — SALAIRES ET COMMISSIONS
+// =============================================================================
+
+enum PayrollStatus {
+  BROUILLON
+  CALCULE
+  VALIDE
+  PAYE
+  ANNULE
+}
+
+enum PayrollItemType {
+  PRIME
+  COMMISSION
+  HEURES_SUP
+  RETENUE
+  AVANCE
+  COTISATION
+  IMPOT
+}
+
+model Payroll {
+  id         String   @id @default(cuid())
+  reference  String   @unique
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  /// Periode de paie : annee + mois (1-12).
+  year  Int
+  month Int
+
+  baseSalary       Decimal @db.Decimal(14, 2) @map("base_salary")
+  totalBonuses     Decimal @default(0) @db.Decimal(14, 2) @map("total_bonuses")
+  totalCommissions Decimal @default(0) @db.Decimal(14, 2) @map("total_commissions")
+  totalOvertime    Decimal @default(0) @db.Decimal(14, 2) @map("total_overtime")
+  totalDeductions  Decimal @default(0) @db.Decimal(14, 2) @map("total_deductions")
+  totalAdvances    Decimal @default(0) @db.Decimal(14, 2) @map("total_advances")
+  grossSalary      Decimal @db.Decimal(14, 2) @map("gross_salary")
+  netSalary        Decimal @db.Decimal(14, 2) @map("net_salary")
+
+  status PayrollStatus @default(BROUILLON)
+
+  validatedById String?   @map("validated_by_id")
+  validatedAt   DateTime? @map("validated_at")
+  paidAt        DateTime? @map("paid_at")
+
+  items       PayrollItem[]
+  commissions Commission[]
+  payments    Payment[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Une seule fiche de paie par employe et par mois.
+  @@unique([employeeId, year, month])
+  @@index([year, month, status])
+  @@map("payrolls")
+}
+
+/// Ligne de bulletin : prime, retenue, avance, heures supplementaires...
+model PayrollItem {
+  id        String          @id @default(cuid())
+  payrollId String          @map("payroll_id")
+  payroll   Payroll         @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  type      PayrollItemType
+  label     String
+  amount    Decimal         @db.Decimal(14, 2)
+  /// Quantite (ex : nombre d'heures supplementaires).
+  quantity  Decimal?        @db.Decimal(10, 2)
+  notes     String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([payrollId, type])
+  @@map("payroll_items")
+}
+
+enum CommissionSourceType {
+  VENTE_DOCUMENT
+  INSCRIPTION_FORMATION
+  PRESTATION
+}
+
+enum CommissionStatus {
+  EN_ATTENTE
+  VALIDEE
+  INTEGREE_PAIE
+  ANNULEE
+}
+
+/// Regle de calcul appliquee automatiquement (module 6).
+/// Exemple du cahier des charges : formation 10 %, document 20 %.
+model CommissionRule {
+  id          String               @id @default(cuid())
+  name        String
+  sourceType  CommissionSourceType @map("source_type")
+  /// Taux en pourcentage du montant de la vente (ex : 10.00 = 10 %).
+  rate        Decimal              @db.Decimal(5, 2)
+  /// Montant fixe alternatif, si le taux ne s'applique pas.
+  fixedAmount Decimal?             @db.Decimal(14, 2) @map("fixed_amount")
+  /// Bornes optionnelles sur le montant de la vente.
+  minAmount   Decimal?             @db.Decimal(14, 2) @map("min_amount")
+  maxAmount   Decimal?             @db.Decimal(14, 2) @map("max_amount")
+  isActive    Boolean              @default(true) @map("is_active")
+  priority    Int                  @default(0)
+
+  commissions Commission[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([sourceType, isActive])
+  @@map("commission_rules")
+}
+
+model Commission {
+  id         String   @id @default(cuid())
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  sourceType CommissionSourceType @map("source_type")
+  /// Identifiant de la vente / inscription / prestation a l'origine du calcul.
+  sourceId   String               @map("source_id")
+
+  /// Montant de la transaction ayant genere la commission.
+  baseAmount Decimal          @db.Decimal(14, 2) @map("base_amount")
+  rate       Decimal          @db.Decimal(5, 2)
+  amount     Decimal          @db.Decimal(14, 2)
+  status     CommissionStatus @default(EN_ATTENTE)
+
+  ruleId String?         @map("rule_id")
+  rule   CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  /// Fiche de paie sur laquelle la commission a ete integree.
+  payrollId String?  @map("payroll_id")
+  payroll   Payroll? @relation(fields: [payrollId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeId, status])
+  @@index([sourceType, sourceId])
+  @@map("commissions")
+}
+
+// =============================================================================
+// BAREMES DE REMUNERATION PAR ACTIVITE
+// =============================================================================
+//
+// Un taux unique par employe ne decrit pas la realite de TED'S SERVICE. Une
+// meme personne peut toucher :
+//   - 85 % de chaque somme versee par un enfant pour sa formation ;
+//   - 1 000 F par vente de document a un enfant ;
+//   -  5 % de chaque paiement de prestation informatique ;
+//   -  500 F sur les 2 000 F de frais d'inscription en anglais.
+//
+// La remuneration se declare donc ACTIVITE PAR ACTIVITE, avec un mode de
+// calcul propre a chacune. Le total du mois est la somme des lignes produites.
+
+/// Nature de l'operation qui ouvre droit a remuneration.
+enum ActiviteRemuneree {
+  FRAIS_INSCRIPTION
+  FRAIS_FORMATION
+  VENTE_DOCUMENT
+  PRESTATION
+}
+
+enum ModeRemuneration {
+  /// Part du montant encaisse (ex. 85 %).
+  POURCENTAGE
+  /// Somme forfaitaire (ex. 1 000 F), independante du montant.
+  MONTANT_FIXE
+}
+
+/// Ce que compte un montant fixe.
+enum AssietteFixe {
+  /// Une fois par operation, quel que soit le nombre d'articles.
+  PAR_OPERATION
+  /// Une fois par article vendu (une vente de 3 documents en compte 3).
+  PAR_ARTICLE
+}
+
+/// A quelles operations la regle s'applique.
+enum PorteeRemuneration {
+  /// Uniquement celles que l'employe a lui-meme vendues — commission classique.
+  MES_OPERATIONS
+  /// Toutes celles qui correspondent a la cible, quel qu'en soit le vendeur.
+  /// C'est le cas de l'animatrice payee sur les paiements des enfants qu'elle
+  /// encadre : elle ne les a pas « vendus ».
+  TOUTE_ACTIVITE
+}
+
+model RemunerationRule {
+  id         String   @id @default(cuid())
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  /// Phrase lisible par un gestionnaire (« 85 % sur les paiements des enfants »).
+  label String
+
+  activity ActiviteRemuneree
+  mode     ModeRemuneration
+  portee   PorteeRemuneration @default(MES_OPERATIONS)
+
+  /// Renseigne si mode = POURCENTAGE.
+  rate Decimal? @db.Decimal(5, 2)
+  /// Renseigne si mode = MONTANT_FIXE.
+  fixedAmount Decimal?     @db.Decimal(14, 2) @map("fixed_amount")
+  fixedBasis  AssietteFixe @default(PAR_OPERATION) @map("fixed_basis")
+
+  // --- Ciblage facultatif ---
+  // Sans cible, la regle vaut pour toute l'activite. Avec cible, elle ne vaut
+  // que pour elle — et prime alors sur la regle generale, plus specifique.
+  trainingId         String?           @map("training_id")
+  training           Training?         @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  trainingCategoryId String?           @map("training_category_id")
+  trainingCategory   TrainingCategory? @relation(fields: [trainingCategoryId], references: [id], onDelete: Cascade)
+
+  documentProductId String?           @map("document_product_id")
+  documentProduct   DocumentProduct?  @relation(fields: [documentProductId], references: [id], onDelete: Cascade)
+  documentCategory  DocumentCategory? @map("document_category")
+
+  serviceId       String?          @map("service_id")
+  service         Service?         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  serviceCategory ServiceCategory? @map("service_category")
+
+  /// Depart d'egalite entre deux regles de meme specificite.
+  priority Int     @default(0)
+  isActive Boolean @default(true) @map("is_active")
+
+  /// Un bareme peut changer en cours d'annee ; les bornes evitent de recalculer
+  /// le passe avec le nouveau taux.
+  startDate DateTime? @map("start_date")
+  endDate   DateTime? @map("end_date")
+
+  notes String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeId, isActive])
+  @@index([activity])
+  @@map("remuneration_rules")
+}
+
+// =============================================================================
+// MODULE 7 — VENTE DE DOCUMENTS ADMINISTRATIFS
+// =============================================================================
+
+enum DocumentCategory {
+  ATTESTATION
+  CERTIFICAT
+  DUPLICATA
+  CARTE_ETUDIANT
+  BADGE
+  DOSSIER
+  RELEVE_NOTES
+  SUPPORT_COURS
+  LIVRE
+}
+
+enum ProductStatus {
+  DISPONIBLE
+  RUPTURE
+  ARCHIVE
+}
+
+model DocumentProduct {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  name        String
+  category    DocumentCategory
+  description String?
+  imageUrl    String?          @map("image_url")
+  price       Decimal          @db.Decimal(14, 2)
+  /// Stock courant ; null si le document est genere a la demande.
+  stock       Int?
+  alertStock  Int?             @map("alert_stock")
+  status      ProductStatus    @default(DISPONIBLE)
+  /// Taux de commission specifique a ce produit (sinon, regle globale).
+  commissionRate Decimal?      @db.Decimal(5, 2) @map("commission_rate")
+
+  saleLines DocumentSaleLine[]
+  remunerationRules RemunerationRule[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([category, status])
+  @@map("document_products")
+}
+
+enum SaleStatus {
+  BROUILLON
+  CONFIRMEE
+  PAYEE
+  PARTIELLEMENT_PAYEE
+  ANNULEE
+}
+
+model DocumentSale {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  /// Agent commercial ayant realise la vente (base du calcul de commission).
+  /// Facultatif : TED'S SERVICE vend des documents a prix fixe sans notion de
+  /// vendeur attitre — seul un bareme cible sur « toute l'activite » a alors
+  /// un sens (voir modules/remuneration). Meme choix que StudentRegistration.
+  sellerId String?   @map("seller_id")
+  seller   Employee? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+
+  /// Client : soit un apprenant enregistre, soit un client de passage.
+  studentId    String?  @map("student_id")
+  student      Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  customerName String?  @map("customer_name")
+  customerPhone String? @map("customer_phone")
+
+  subtotal    Decimal @db.Decimal(14, 2)
+  discount    Decimal @default(0) @db.Decimal(14, 2)
+  taxAmount   Decimal @default(0) @db.Decimal(14, 2) @map("tax_amount")
+  totalAmount Decimal @db.Decimal(14, 2) @map("total_amount")
+  paidAmount  Decimal @default(0) @db.Decimal(14, 2) @map("paid_amount")
+
+  status SaleStatus @default(BROUILLON)
+  soldAt DateTime   @default(now()) @map("sold_at")
+
+  lines    DocumentSaleLine[]
+  payments Payment[]
+  invoice  Invoice?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([sellerId, soldAt])
+  @@index([status])
+  @@map("document_sales")
+}
+
+model DocumentSaleLine {
+  id        String          @id @default(cuid())
+  saleId    String          @map("sale_id")
+  sale      DocumentSale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String          @map("product_id")
+  product   DocumentProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  quantity  Int
+  unitPrice Decimal @db.Decimal(14, 2) @map("unit_price")
+  lineTotal Decimal @db.Decimal(14, 2) @map("line_total")
+
+  @@index([saleId])
+  @@map("document_sale_lines")
+}
+
+// =============================================================================
+// MODULES 8 & 9 — FORMATIONS ET APPRENANTS
+// =============================================================================
+
+enum TrainingLevel {
+  DEBUTANT
+  INTERMEDIAIRE
+  AVANCE
+  EXPERT
+}
+
+enum TrainingStatus {
+  BROUILLON
+  OUVERTE
+  EN_COURS
+  TERMINEE
+  ANNULEE
+}
+
+model TrainingCategory {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  description String?
+
+  trainings Training[]
+  remunerationRules RemunerationRule[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("training_categories")
+}
+
+model Training {
+  id          String @id @default(cuid())
+  code        String @unique
+  title       String
+  description String?
+  /// Programme detaille (contenu pedagogique).
+  program     String?
+
+  categoryId String?           @map("category_id")
+  category   TrainingCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  level TrainingLevel @default(DEBUTANT)
+  /// Duree en heures.
+  durationHours Int     @map("duration_hours")
+  price         Decimal @db.Decimal(14, 2)
+  maxStudents   Int?    @map("max_students")
+
+  startDate DateTime?      @map("start_date")
+  endDate   DateTime?      @map("end_date")
+  status    TrainingStatus @default(BROUILLON)
+
+  /// Formateur assigne.
+  trainerId String?   @map("trainer_id")
+  trainer   Employee? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
+
+  registrations StudentRegistration[]
+  remunerationRules RemunerationRule[]
+  certificates  Certificate[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([status, startDate])
+  @@map("trainings")
+}
+
+model Student {
+  id          String   @id @default(cuid())
+  matricule   String   @unique
+  firstName   String   @map("first_name")
+  lastName    String   @map("last_name")
+  gender      Gender
+  birthDate   DateTime? @map("birth_date")
+  phone       String
+  email       String?
+  address     String?
+  photoUrl    String?  @map("photo_url")
+  /// Dernier diplome ou niveau d'etudes.
+  educationLevel String? @map("education_level")
+
+  registrations StudentRegistration[]
+  certificates  Certificate[]
+  documentSales DocumentSale[]
+  serviceOrders ServiceOrder[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([lastName, firstName])
+  @@map("students")
+}
+
+enum RegistrationStatus {
+  INSCRIT
+  REINSCRIT
+  EN_COURS
+  TERMINE
+  ABANDONNE
+  ANNULE
+}
+
+model StudentRegistration {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  studentId  String   @map("student_id")
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  trainingId String   @map("training_id")
+  training   Training @relation(fields: [trainingId], references: [id], onDelete: Restrict)
+
+  /// Commercial ayant realise l'inscription (base de la commission).
+  sellerId String?   @map("seller_id")
+  seller   Employee? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+
+  status RegistrationStatus @default(INSCRIT)
+  /// Frais d'inscription, verses une fois a l'entree (2 000 F par defaut chez
+  /// TED'S SERVICE). Distincts des frais de formation : les baremes de
+  /// remuneration ne les traitent pas de la meme facon.
+  registrationFee Decimal @default(0) @db.Decimal(14, 2) @map("registration_fee")
+  /// Frais de FORMATION negocies (peut differer du prix catalogue).
+  agreedAmount Decimal @db.Decimal(14, 2) @map("agreed_amount")
+  discount     Decimal @default(0) @db.Decimal(14, 2)
+  paidAmount   Decimal @default(0) @db.Decimal(14, 2) @map("paid_amount")
+
+  registeredAt DateTime @default(now()) @map("registered_at")
+  /// Note finale sur 20.
+  finalGrade   Decimal? @db.Decimal(4, 2) @map("final_grade")
+  evaluation   String?
+
+  payments    Payment[]
+  grades      Grade[]
+  certificate Certificate?
+  invoice     Invoice?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Un apprenant ne s'inscrit qu'une fois a une session donnee.
+  @@unique([studentId, trainingId])
+  @@index([trainingId, status])
+  @@map("student_registrations")
+}
+
+model Grade {
+  id             String              @id @default(cuid())
+  registrationId String              @map("registration_id")
+  registration   StudentRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  label  String
+  score  Decimal @db.Decimal(4, 2)
+  /// Note maximale du bareme (20 par defaut).
+  maxScore Decimal @default(20) @db.Decimal(4, 2) @map("max_score")
+  weight   Decimal @default(1) @db.Decimal(4, 2)
+  gradedAt DateTime @default(now()) @map("graded_at")
+
+  @@index([registrationId])
+  @@map("grades")
+}
+
+model Certificate {
+  id        String @id @default(cuid())
+  /// Numero unique imprime sur le certificat.
+  reference String @unique
+
+  studentId  String   @map("student_id")
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  trainingId String   @map("training_id")
+  training   Training @relation(fields: [trainingId], references: [id], onDelete: Restrict)
+
+  registrationId String?              @unique @map("registration_id")
+  registration   StudentRegistration? @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+
+  issuedAt DateTime @default(now()) @map("issued_at")
+  mention  String?
+  /// Jeton de verification publique (evolution prevue au chapitre 8).
+  verificationCode String  @unique @map("verification_code")
+  pdfUrl           String? @map("pdf_url")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([studentId])
+  @@map("certificates")
+}
+
+// =============================================================================
+// MODULE 10 — PRESTATIONS DE SERVICES
+// =============================================================================
+
+enum ServiceCategory {
+  DEVELOPPEMENT_WEB
+  DEVELOPPEMENT_MOBILE
+  MAINTENANCE
+  INSTALLATION_WINDOWS
+  INSTALLATION_LOGICIELS
+  GRAPHISME
+  CREATION_LOGO
+  CREATION_SITE
+  CREATION_APPLICATION
+  AUTRE
+}
+
+enum ServiceOrderStatus {
+  DEVIS
+  CONFIRMEE
+  EN_COURS
+  LIVREE
+  FACTUREE
+  ANNULEE
+}
+
+model Service {
+  id          String          @id @default(cuid())
+  code        String          @unique
+  name        String
+  category    ServiceCategory
+  description String?
+  /// Prix indicatif ; le montant reel est negocie a la commande.
+  basePrice   Decimal         @db.Decimal(14, 2) @map("base_price")
+  commissionRate Decimal?     @db.Decimal(5, 2) @map("commission_rate")
+  isActive    Boolean         @default(true) @map("is_active")
+
+  orders ServiceOrder[]
+  remunerationRules RemunerationRule[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([category, isActive])
+  @@map("services")
+}
+
+model ServiceOrder {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  serviceId String  @map("service_id")
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  /// Agent responsable de la vente (base de la commission).
+  sellerId String   @map("seller_id")
+  seller   Employee @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+
+  studentId     String?  @map("student_id")
+  student       Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  customerName  String   @map("customer_name")
+  customerPhone String?  @map("customer_phone")
+  customerEmail String?  @map("customer_email")
+
+  description String?
+  amount      Decimal            @db.Decimal(14, 2)
+  paidAmount  Decimal            @default(0) @db.Decimal(14, 2) @map("paid_amount")
+  status      ServiceOrderStatus @default(DEVIS)
+
+  orderedAt   DateTime  @default(now()) @map("ordered_at")
+  deliveredAt DateTime? @map("delivered_at")
+
+  payments Payment[]
+  invoice  Invoice?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([sellerId, orderedAt])
+  @@index([status])
+  @@map("service_orders")
+}
+
+// =============================================================================
+// MODULES 11 & 12 — CAISSE, PAIEMENTS ET COMPTABILITE
+// =============================================================================
+
+enum PaymentMethod {
+  ESPECES
+  MOBILE_MONEY
+  VIREMENT
+  CHEQUE
+  CARTE
+}
+
+enum PaymentStatus {
+  EN_ATTENTE
+  CONFIRME
+  ANNULE
+  REMBOURSE
+}
+
+/// Paiement rattache a une source unique (vente, inscription, prestation, paie).
+/// Ce que REGLE un paiement.
+///
+/// Le lien (inscription, vente, prestation) ne suffit pas : un encaissement
+/// rattache a une inscription peut etre soit les frais d'inscription, soit une
+/// mensualite de formation. Or les baremes de remuneration distinguent les
+/// deux — 500 F sur l'inscription, 85 % sur les mensualites. L'objet doit donc
+/// etre porte explicitement.
+enum PaymentPurpose {
+  FRAIS_INSCRIPTION
+  FRAIS_FORMATION
+  VENTE_DOCUMENT
+  PRESTATION
+  SALAIRE
+  AUTRE
+}
+
+model Payment {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  amount    Decimal        @db.Decimal(14, 2)
+  method    PaymentMethod  @default(ESPECES)
+  status    PaymentStatus  @default(CONFIRME)
+  purpose   PaymentPurpose @default(AUTRE)
+  paidAt    DateTime       @default(now()) @map("paid_at")
+  notes     String?
+  /// Reference externe (numero de transaction Mobile Money, cheque...).
+  externalReference String? @map("external_reference")
+
+  documentSaleId String?       @map("document_sale_id")
+  documentSale   DocumentSale? @relation(fields: [documentSaleId], references: [id], onDelete: Cascade)
+
+  registrationId String?              @map("registration_id")
+  registration   StudentRegistration? @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  serviceOrderId String?       @map("service_order_id")
+  serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  /// Paiement d'un salaire (sortie de caisse).
+  payrollId String?  @map("payroll_id")
+  payroll   Payroll? @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+
+  receivedById String? @map("received_by_id")
+
+  receipt         Receipt?
+  cashTransaction CashTransaction?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([paidAt])
+  @@index([status, method])
+  @@index([purpose, paidAt])
+  @@map("payments")
+}
+
+enum CashDirection {
+  ENTREE
+  SORTIE
+}
+
+/// Journal de caisse (module 11) : chaque mouvement d'especes.
+model CashTransaction {
+  id        String        @id @default(cuid())
+  reference String        @unique
+  direction CashDirection
+  amount    Decimal       @db.Decimal(14, 2)
+  /// Solde de caisse apres l'operation (calcule a l'enregistrement).
+  balanceAfter Decimal    @db.Decimal(14, 2) @map("balance_after")
+
+  label       String
+  category    String?
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+
+  paymentId String?  @unique @map("payment_id")
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  employeeId String?   @map("employee_id")
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([occurredAt])
+  @@index([direction])
+  @@map("cash_transactions")
+}
+
+enum RevenueSource {
+  VENTE_DOCUMENT
+  FORMATION
+  PRESTATION
+  AUTRE
+}
+
+model Revenue {
+  id        String        @id @default(cuid())
+  reference String        @unique
+  source    RevenueSource
+  label     String
+  amount    Decimal       @db.Decimal(14, 2)
+  occurredAt DateTime     @default(now()) @map("occurred_at")
+  sourceId  String?       @map("source_id")
+  notes     String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([occurredAt, source])
+  @@map("revenues")
+}
+
+enum ExpenseCategory {
+  SALAIRE
+  LOYER
+  FOURNITURE
+  TRANSPORT
+  ELECTRICITE
+  EAU
+  INTERNET
+  MAINTENANCE
+  MARKETING
+  IMPOT
+  AUTRE
+}
+
+model Expense {
+  id        String          @id @default(cuid())
+  reference String          @unique
+  category  ExpenseCategory
+  label     String
+  amount    Decimal         @db.Decimal(14, 2)
+  occurredAt DateTime       @default(now()) @map("occurred_at")
+  supplier  String?
+  receiptUrl String?        @map("receipt_url")
+  notes     String?
+  approvedById String?      @map("approved_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([occurredAt, category])
+  @@map("expenses")
+}
+
+/// Ecriture du journal comptable (grand livre, balance).
+model AccountingEntry {
+  id        String   @id @default(cuid())
+  entryDate DateTime @map("entry_date") @db.Date
+  /// Numero de compte du plan comptable (ex : 601, 701).
+  accountCode String @map("account_code")
+  accountName String @map("account_name")
+  label       String
+  debit       Decimal @default(0) @db.Decimal(14, 2)
+  credit      Decimal @default(0) @db.Decimal(14, 2)
+  /// Piece justificative liee (vente, depense...).
+  sourceType  String? @map("source_type")
+  sourceId    String? @map("source_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([entryDate])
+  @@index([accountCode, entryDate])
+  @@map("accounting_entries")
+}
+
+// =============================================================================
+// MODULE 13 — STOCK
+// =============================================================================
+
+enum InventoryCategory {
+  LIVRE
+  SUPPORT
+  DOCUMENT
+  BADGE
+  CARTE
+  CONSOMMABLE
+  MATERIEL
+}
+
+enum StockMovementType {
+  ENTREE
+  SORTIE
+  INVENTAIRE
+  PERTE
+}
+
+model InventoryItem {
+  id       String            @id @default(cuid())
+  code     String            @unique
+  name     String
+  category InventoryCategory
+  unit     String            @default("unite")
+  quantity Int               @default(0)
+  alertQuantity Int          @default(0) @map("alert_quantity")
+  unitCost Decimal           @default(0) @db.Decimal(14, 2) @map("unit_cost")
+  location String?
+
+  movements StockMovement[]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([category])
+  @@map("inventory_items")
+}
+
+model StockMovement {
+  id     String            @id @default(cuid())
+  itemId String            @map("item_id")
+  item   InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type   StockMovementType
+  quantity Int
+  /// Quantite en stock apres le mouvement.
+  quantityAfter Int        @map("quantity_after")
+  label    String?
+  occurredAt DateTime      @default(now()) @map("occurred_at")
+  recordedById String?     @map("recorded_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([itemId, occurredAt])
+  @@map("stock_movements")
+}
+
+// =============================================================================
+// FACTURES ET RECUS (generes automatiquement — module 7)
+// =============================================================================
+
+model Invoice {
+  id        String   @id @default(cuid())
+  number    String   @unique
+  issuedAt  DateTime @default(now()) @map("issued_at")
+  dueDate   DateTime? @map("due_date")
+
+  customerName String  @map("customer_name")
+  subtotal     Decimal @db.Decimal(14, 2)
+  taxAmount    Decimal @default(0) @db.Decimal(14, 2) @map("tax_amount")
+  totalAmount  Decimal @db.Decimal(14, 2) @map("total_amount")
+
+  documentSaleId String?       @unique @map("document_sale_id")
+  documentSale   DocumentSale? @relation(fields: [documentSaleId], references: [id], onDelete: SetNull)
+
+  registrationId String?              @unique @map("registration_id")
+  registration   StudentRegistration? @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+
+  serviceOrderId String?       @unique @map("service_order_id")
+  serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+
+  pdfUrl String? @map("pdf_url")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([issuedAt])
+  @@map("invoices")
+}
+
+model Receipt {
+  id        String   @id @default(cuid())
+  number    String   @unique
+  issuedAt  DateTime @default(now()) @map("issued_at")
+  amount    Decimal  @db.Decimal(14, 2)
+  payerName String   @map("payer_name")
+
+  paymentId String  @unique @map("payment_id")
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  pdfUrl String? @map("pdf_url")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([issuedAt])
+  @@map("receipts")
+}
+
+// =============================================================================
+// MODULE 16 — NOTIFICATIONS
+// =============================================================================
+
+enum NotificationChannel {
+  INTERNE
+  EMAIL
+  SMS
+}
+
+enum NotificationType {
+  EXPIRATION_CONTRAT
+  PAIEMENT
+  CONGE
+  NOUVELLE_VENTE
+  STOCK_FAIBLE
+  SALAIRE_VALIDE
+  SYSTEME
+}
+
+model Notification {
+  id      String              @id @default(cuid())
+  userId  String              @map("user_id")
+  user    User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type    NotificationType
+  channel NotificationChannel @default(INTERNE)
+
+  title   String
+  message String
+  /// Lien interne vers la ressource concernee.
+  link    String?
+
+  isRead Boolean   @default(false) @map("is_read")
+  readAt DateTime? @map("read_at")
+  sentAt DateTime? @map("sent_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+// =============================================================================
+// MODULE 17 — PARAMETRES
+// =============================================================================
+
+/// Table cle/valeur pour les parametres de l'entreprise (module 17).
+/// Une seule ligne par cle ; les valeurs typees sont serialisees en JSON.
+model Setting {
+  key         String   @id
+  value       Json
+  category    String   @default("general")
+  label       String
+  description String?
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([category])
+  @@map("settings")
+}
+
+// =============================================================================
+// MODULE 18 — VITRINE PUBLIQUE
+// =============================================================================
+
+/// Question frequente affichee sur la page publique /questions.
+/// `answer` porte @db.Text : une reponse depasse largement les 191 caracteres
+/// du VARCHAR par defaut de MySQL, la tronquer changerait le sens du texte.
+model FaqEntry {
+  id       String @id @default(cuid())
+  question String @db.Text
+  answer   String @db.Text
+  /// Ordre d'affichage, croissant. Deux entrees peuvent partager un rang :
+  /// l'ordre stable retombe alors sur `createdAt`.
+  order    Int    @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([order])
+  @@map("faq_entries")
+}
+
+/// Regroupement affiche au-dessus des cartes de la page /fonctionnalites.
+enum LandingModuleFamille {
+  RESSOURCES_HUMAINES
+  ACTIVITE
+  FINANCES
+  PILOTAGE
+}
+
+/// Carte « module du produit », affichee sur l'accueil et /fonctionnalites.
+/// `icon` porte le nom d'une icone Lucide autorisee (voir
+/// `modules/landing/presentation/landing-icons.ts`), jamais un composant.
+model LandingModule {
+  id          String               @id @default(cuid())
+  title       String
+  description String               @db.Text
+  icon        String
+  famille     LandingModuleFamille
+  order       Int                  @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([order])
+  @@map("landing_modules")
+}
+
+/// Argument « pourquoi choisir TED'S SERVICE », affiche sur /avantages.
+model LandingArgument {
+  id          String @id @default(cuid())
+  title       String
+  description String @db.Text
+  icon        String
+  order       Int    @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([order])
+  @@map("landing_arguments")
+}
+
+/// Etape du parcours affiche sur /fonctionnement. Le numero de l'etape
+/// (« Étape 1 », « Étape 2 »...) se deduit du rang dans `order`, pas d'un
+/// champ separe qui pourrait se desynchroniser de l'affichage reel.
+model LandingWorkflowStep {
+  id          String @id @default(cuid())
+  title       String
+  description String @db.Text
+  icon        String
+  order       Int    @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([order])
+  @@map("landing_workflow_steps")
+}
