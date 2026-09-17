@@ -9,6 +9,7 @@ import { authorizeAction } from "@/infrastructure/auth/dal";
 import type { SerializedDomainError } from "@/shared/domain/errors";
 
 import {
+  buildFormContext,
   createResource,
   removeResource,
   updateResource,
@@ -130,6 +131,59 @@ export async function updateResourceAction(
   revalidatePath(`/${definition.key}`);
   revalidatePath(`/${definition.key}/${id}`);
   redirect(`/${definition.key}/${id}`);
+}
+
+export interface QuickCreateState {
+  message?: string;
+  fieldErrors?: Record<string, string[]>;
+  values?: Record<string, string>;
+  /** Presente une fois la fiche creee : de quoi peupler le select appelant. */
+  created?: { value: string; label: string };
+}
+
+/**
+ * Cree une fiche depuis un AUTRE formulaire (« + Nouvel apprenant » sur
+ * l'ecran Inscriptions) — memes regles metier et memes controles que la
+ * creation normale (`createResourceAction`), mais sans redirection : la page
+ * appelante reste ouverte, et selectionne elle-meme la fiche creee dans son
+ * propre champ. Voir `FieldDefinition.quickCreate`.
+ */
+export async function quickCreateResourceAction(
+  resourceKey: string,
+  _previousState: QuickCreateState,
+  formData: FormData,
+): Promise<QuickCreateState> {
+  const definition = definitionOrThrow(resourceKey);
+  const user = await authorizeAction(definition.permissions.create);
+
+  // Le formulaire rapide n'affiche que les champs simples obligatoires : les
+  // champs auto-generes (reference, matricule, jeton) et les dates du jour ne
+  // sont donc pas soumis. On les complete comme le ferait l'ecran de creation
+  // normale, pour que la fiche cree exactement les memes valeurs.
+  const { defaults } = await buildFormContext(prismaResourceRepository, definition, "creation");
+  const values = { ...defaults, ...readValues(formData) };
+  const result = await createResource(prismaResourceRepository, definition, values);
+
+  if (!result.ok) {
+    return toFormState(result.error.toJSON(), values);
+  }
+
+  await recordAudit({
+    userId: user.id,
+    action: `${definition.model.toUpperCase()}_CREATE`,
+    entityType: definition.model,
+    entityId: result.value,
+    after: values,
+    ipAddress: await clientIp(),
+  });
+
+  revalidatePath(`/${definition.key}`);
+
+  const label =
+    definition.titleFields.map((champ) => values[champ]).filter(Boolean).join(" ") ||
+    definition.singular;
+
+  return { created: { value: result.value, label } };
 }
 
 /**

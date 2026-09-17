@@ -222,8 +222,13 @@ async function creerCatalogues() {
         name: document.nom,
         category: document.cat,
         price: document.prix,
-        stock: entre(20, 200),
-        alertStock: 15,
+        // TED'S SERVICE ne tient pas de stock de documents : chaque piece est
+        // imprimee a la demande, au moment ou l'apprenant paie. `stock: null`
+        // est le cas prevu par le domaine pour cela (voir `nextProductStock`,
+        // module sales) — un stock chiffre bloquerait une vente au-dela d'un
+        // seuil qui n'existe pas dans la realite de l'entreprise.
+        stock: null,
+        alertStock: null,
         status: "DISPONIBLE",
         commissionRate: 20,
       },

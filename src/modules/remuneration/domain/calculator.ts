@@ -27,6 +27,13 @@ export interface ArticleOperation {
   quantity: number;
   /** Montant de cette ligne dans l'operation. */
   amount: number;
+  /**
+   * Cout total de cette ligne (cout unitaire fige a la vente x quantite),
+   * pour le mode MARGE. Null si le produit n'avait pas de cout renseigne —
+   * la marge de cette ligne compte alors pour zero, plutot que de supposer un
+   * cout inconnu.
+   */
+  costAmount?: number | null;
 }
 
 /**
@@ -194,6 +201,17 @@ function appliquer(
     const taux = regle.rate ?? 0;
     montant = Money.fromPersistence(base).percentage(taux).amount;
     detail = `${taux.toLocaleString("fr-FR")} % de ${formaterMontant(base)}`;
+  } else if (regle.mode === "MARGE") {
+    // Le cout n'est connu que par article : un article sans cout renseigne
+    // compte pour une marge nulle plutot que pour sa valeur pleine — mieux
+    // vaut une commission sous-evaluee et visible qu'une marge inventee.
+    const marge = articles.reduce(
+      (somme, article) => somme + (article.amount - (article.costAmount ?? article.amount)),
+      0,
+    );
+    const taux = regle.rate ?? 0;
+    montant = Money.fromPersistence(marge).percentage(taux).amount;
+    detail = `${taux.toLocaleString("fr-FR")} % de la marge (${formaterMontant(marge)})`;
   } else {
     const unitaire = regle.fixedAmount ?? 0;
 

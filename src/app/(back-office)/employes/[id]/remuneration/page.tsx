@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Banknote, Calculator, Scale, Wallet } from "lucide-react";
+import { Banknote, Calculator, Receipt, Scale, Wallet } from "lucide-react";
 
 import { requirePermission } from "@/infrastructure/auth/dal";
 import { PERMISSIONS } from "@/modules/auth/domain/permissions";
@@ -12,6 +12,7 @@ import { RuleForm } from "@/modules/remuneration/presentation/rule-form";
 import { RuleList } from "@/modules/remuneration/presentation/rule-list";
 import { parseMois } from "@/shared/domain/periode";
 import { formatDateShort, formatMoney, formatNumber, formatPeriod } from "@/shared/lib/format";
+import { LinkButton } from "@/shared/ui/button";
 import { Card, CardBody, CardHeader } from "@/shared/ui/card";
 import { EmptyState } from "@/shared/ui/feedback";
 import { ListFilters } from "@/shared/ui/list-filters";
@@ -71,6 +72,14 @@ export default async function RemunerationEmployePage(props: {
           { label: decompte.employe.nom, href: `/employes/${id}` },
           { label: "Rémunération" },
         ]}
+        actions={
+          modifiable ? (
+            <LinkButton href={`/salaires/nouveau?employeeId=${id}&mois=${mois.champ}`}>
+              <Receipt className="size-4" />
+              Créer le bulletin de paie
+            </LinkButton>
+          ) : null
+        }
       />
 
       <Card className="mb-6">

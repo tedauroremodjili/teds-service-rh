@@ -162,3 +162,22 @@ export async function getStudentStats(): Promise<StudentStats> {
     ),
   };
 }
+
+export interface StudentOption {
+  id: string;
+  label: string;
+}
+
+/** Apprenants actifs, pour les combos qui doivent en choisir un (vente, inscription...). */
+export async function getActiveStudentOptions(): Promise<StudentOption[]> {
+  const apprenants = await prisma.student.findMany({
+    where: { deletedAt: null },
+    select: { id: true, firstName: true, lastName: true, matricule: true },
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+  });
+
+  return apprenants.map((apprenant) => ({
+    id: apprenant.id,
+    label: `${apprenant.lastName} ${apprenant.firstName} — ${apprenant.matricule}`,
+  }));
+}

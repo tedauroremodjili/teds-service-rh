@@ -12,8 +12,8 @@ import {
   ACTIVITE_LABELS,
   ASSIETTES,
   ASSIETTE_LABELS,
-  MODES,
   MODE_LABELS,
+  MODES_PAR_ACTIVITE,
   PORTEES,
   PORTEE_DESCRIPTIONS,
   PORTEE_LABELS,
@@ -73,6 +73,18 @@ export function RuleForm({
   const surDocument = activity === "VENTE_DOCUMENT";
   const surPrestation = activity === "PRESTATION";
 
+  const modesDisponibles = MODES_PAR_ACTIVITE[activity];
+
+  // Changer d'activite peut rendre le mode choisi impossible (la marge n'a de
+  // sens que sur des documents) : on retombe alors sur le premier mode encore
+  // valide, plutot que de laisser un mode disparu du menu reste selectionne.
+  function changerActivite(nouvelle: Activite) {
+    setActivity(nouvelle);
+    if (!MODES_PAR_ACTIVITE[nouvelle].includes(mode)) {
+      setMode(MODES_PAR_ACTIVITE[nouvelle][0]);
+    }
+  }
+
   // Regroupement des formations par categorie (Anglais, Informatique, ...) :
   // la liste vient du catalogue reel et suit ses categories telles qu'elles
   // existent en base, sans rien coder en dur — une categorie ajoutee demain
@@ -111,7 +123,7 @@ export function RuleForm({
             id="activity"
             name="activity"
             value={activity}
-            onChange={(event) => setActivity(event.target.value as Activite)}
+            onChange={(event) => changerActivite(event.target.value as Activite)}
           >
             {ACTIVITES.map((valeur) => (
               <option key={valeur} value={valeur}>
@@ -128,7 +140,7 @@ export function RuleForm({
             value={mode}
             onChange={(event) => setMode(event.target.value as Mode)}
           >
-            {MODES.map((valeur) => (
+            {modesDisponibles.map((valeur) => (
               <option key={valeur} value={valeur}>
                 {MODE_LABELS[valeur]}
               </option>
@@ -136,12 +148,16 @@ export function RuleForm({
           </Select>
         </Field>
 
-        {mode === "POURCENTAGE" ? (
+        {mode === "POURCENTAGE" || mode === "MARGE" ? (
           <Field
-            label="Taux (%)"
+            label={mode === "MARGE" ? "Part de la marge (%)" : "Taux (%)"}
             htmlFor="rate"
             error={erreur("rate")}
-            hint="Part de chaque somme encaissée."
+            hint={
+              mode === "MARGE"
+                ? "Part du bénéfice net (prix de vente − prix de revient) reversée."
+                : "Part de chaque somme encaissée."
+            }
             required
           >
             <Input

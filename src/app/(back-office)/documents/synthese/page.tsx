@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AlertTriangle, FileText, PackageCheck, Wallet } from "lucide-react";
+import { AlertTriangle, FileText, PackageCheck, ShoppingBag } from "lucide-react";
 
 import { requirePermission } from "@/infrastructure/auth/dal";
 import { PERMISSIONS } from "@/modules/auth/domain/permissions";
@@ -100,10 +100,10 @@ export default async function DocumentsPage(props: {
           tone={stats.ruptures > 0 ? "danger" : "success"}
         />
         <StatCard
-          label="Valeur du stock"
-          value={formatMoney(stats.valeurStock)}
-          hint="Articles physiques, au prix de vente"
-          icon={<Wallet />}
+          label="Documents vendus"
+          value={formatNumber(stats.totalVendus)}
+          hint="Total imprimé et facturé, toutes ventes confirmées"
+          icon={<ShoppingBag />}
           tone="accent"
         />
       </div>

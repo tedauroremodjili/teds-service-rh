@@ -24,12 +24,16 @@ import { PageLetterhead } from "@/modules/printing/presentation/page-letterhead"
  * un emetteur et une date a n'importe quelle page sortie de l'application.
  */
 export default async function BackOfficeLayout({ children }: { children: ReactNode }) {
-  const user = await requireAuth();
-  const company = await getCompanyIdentity();
+  // requireAuth() lit le cookie puis recharge l'utilisateur depuis la base ;
+  // getCompanyIdentity() lit les parametres. Les deux sont independants : les
+  // lancer en parallele evite d'additionner leurs latences a chaque
+  // navigation dans le back-office.
+  const [user, company] = await Promise.all([requireAuth(), getCompanyIdentity()]);
 
   return (
     <AppShell
       user={user}
+      logoUrl={company.logoUrl}
       logoutAction={logoutAction}
       printLetterhead={<PageLetterhead company={company} editedBy={user.displayName} />}
     >

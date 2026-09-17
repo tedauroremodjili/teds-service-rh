@@ -1,5 +1,7 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { prisma } from "@/infrastructure/database/prisma";
 import { buildPage, toSkip, type Page, type PaginationParams } from "@/shared/domain/pagination";
 
@@ -132,4 +134,29 @@ export async function getSaleStats(): Promise<SaleStats> {
       Number(impayees._sum.totalAmount ?? 0) - Number(impayees._sum.paidAmount ?? 0),
     ),
   };
+}
+
+/**
+ * Prochaine reference de vente, format `VD-AAAA-0001`.
+ *
+ * Meme algorithme que `nextSequence` du moteur generique (compte, puis
+ * verifie la disponibilite plutot que de lui faire confiance : une vente
+ * supprimee ou une reference saisie a la main ailleurs creerait sinon un
+ * doublon refuse par la base au pire moment). Reimplemente ici plutot que
+ * reutilise : aucun autre module dedie ne reouvre le moteur generique pour un
+ * simple compteur, et cela eviterait de reconstruire une definition de champ
+ * juste pour en extraire un prefixe.
+ */
+export async function nextSaleReference(): Promise<string> {
+  const prefix = "VD";
+  const segment = `${new Date().getFullYear()}-`;
+  const total = await prisma.documentSale.count({});
+
+  for (let essai = 0; essai < 30; essai += 1) {
+    const candidate = `${prefix}-${segment}${String(total + 1 + essai).padStart(4, "0")}`;
+    const existe = await prisma.documentSale.count({ where: { reference: candidate } });
+    if (existe === 0) return candidate;
+  }
+
+  return `${prefix}-${segment}${randomUUID().slice(0, 6).toUpperCase()}`;
 }

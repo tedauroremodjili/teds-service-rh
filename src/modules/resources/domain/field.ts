@@ -92,6 +92,15 @@ export interface FieldDefinition {
   /** Calcule a partir des autres champs : affiche, jamais saisi. */
   computed?: boolean;
   align?: "left" | "right";
+  /**
+   * Cle d'une ressource dont on peut creer une fiche SANS quitter cet ecran
+   * (« + Nouvel apprenant » a cote du champ « Apprenant »). Reserve aux champs
+   * « relation » : le formulaire rapide ne propose que les champs obligatoires
+   * de la ressource visee, et seulement s'ils sont eux-memes simples (texte,
+   * nombre, date, enumeration) — pas une autre relation, pour ne pas ouvrir un
+   * formulaire rapide dans un formulaire rapide.
+   */
+  quickCreate?: string;
 }
 
 /** Raccourci : transforme une enumeration Prisma en options lisibles. */

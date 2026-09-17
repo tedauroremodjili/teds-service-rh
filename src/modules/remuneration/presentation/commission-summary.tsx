@@ -55,7 +55,7 @@ const ACTIVITE_COURTE: Record<Activite, string> = {
 };
 
 function calculCourt(regle: Pick<RegleRemuneration, "mode" | "rate" | "fixedAmount">): string {
-  return regle.mode === "POURCENTAGE"
-    ? formatPercent(regle.rate ?? 0)
-    : formatMoney(regle.fixedAmount ?? 0);
+  if (regle.mode === "POURCENTAGE") return formatPercent(regle.rate ?? 0);
+  if (regle.mode === "MARGE") return `${formatPercent(regle.rate ?? 0)} marge`;
+  return formatMoney(regle.fixedAmount ?? 0);
 }

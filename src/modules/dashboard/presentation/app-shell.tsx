@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore, type ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronLeft, ChevronRight, Globe, LogOut, Menu, Printer, X } from "lucide-react";
@@ -10,7 +11,7 @@ import type { CurrentUser } from "@/modules/auth/domain/session";
 import { visibleNavigation, type NavGroup } from "@/modules/dashboard/domain/navigation";
 import { cn } from "@/shared/lib/utils";
 import { initialsFromName } from "@/shared/lib/format";
-import { Logo, WordmarkLight } from "@/shared/ui/logo";
+import { WordmarkLight } from "@/shared/ui/logo";
 import { NavIcon } from "@/shared/ui/nav-pending";
 
 /**
@@ -69,11 +70,14 @@ const panneauStore = {
 
 export function AppShell({
   user,
+  logoUrl,
   logoutAction,
   printLetterhead,
   children,
 }: {
   user: CurrentUser;
+  /** Logo de l'entreprise (parametres), affiche dans la barre laterale. */
+  logoUrl: string;
   logoutAction: () => Promise<void>;
   /**
    * Papier a en-tete insere au-dessus du contenu, visible a la seule
@@ -131,6 +135,7 @@ export function AppShell({
         groups={groups}
         activeTitle={groupeActif?.title}
         user={user}
+        logoUrl={logoUrl}
         logoutAction={logoutAction}
         onSelect={(title) => {
           // Recliquer sur la categorie deja ouverte replie le panneau :
@@ -148,6 +153,7 @@ export function AppShell({
         <CategoryPanel
           group={groupeActif}
           user={user}
+          logoUrl={logoUrl}
           logoutAction={logoutAction}
           isActive={isActive}
           onNavigate={naviguer}
@@ -269,12 +275,14 @@ function CategoryRail({
   groups,
   activeTitle,
   user,
+  logoUrl,
   logoutAction,
   onSelect,
 }: {
   groups: NavGroup[];
   activeTitle?: string;
   user: CurrentUser;
+  logoUrl: string;
   logoutAction: () => Promise<void>;
   onSelect: (title: string) => void;
 }) {
@@ -283,8 +291,19 @@ function CategoryRail({
       aria-label="Catégories"
       className="flex h-full w-18 shrink-0 flex-col items-center border-r border-white/10 bg-primary-950 py-3"
     >
-      <Link href="/tableau-de-bord" aria-label="Tableau de bord" className="mb-3">
-        <Logo variant="mark" className="size-11" />
+      <Link
+        href="/tableau-de-bord"
+        aria-label="Tableau de bord"
+        className="mb-3 flex size-11 shrink-0 items-center justify-center rounded-xl bg-white/95 p-1.5 shadow-sm"
+      >
+        <Image
+          src={logoUrl}
+          alt=""
+          width={378}
+          height={142}
+          unoptimized
+          className="h-full w-full object-contain"
+        />
       </Link>
 
       <ul className="flex flex-1 flex-col items-center gap-1 overflow-y-auto">
@@ -348,6 +367,7 @@ function CategoryRail({
 function CategoryPanel({
   group,
   user,
+  logoUrl,
   logoutAction,
   isActive,
   onNavigate,
@@ -355,6 +375,7 @@ function CategoryPanel({
 }: {
   group: NavGroup;
   user: CurrentUser;
+  logoUrl: string;
   logoutAction: () => Promise<void>;
   isActive: (href: string) => boolean;
   onNavigate: () => void;
@@ -363,11 +384,23 @@ function CategoryPanel({
   return (
     <div className="flex h-full w-58 shrink-0 flex-col bg-brand-gradient">
       <div className="flex h-16 shrink-0 items-center gap-2 border-b border-white/10 px-4">
-        <div className="min-w-0 flex-1">
-          <WordmarkLight className="block truncate text-sm" />
-          <p className="truncate text-[0.6rem] uppercase tracking-[0.15em] text-primary-300">
-            Learning &amp; Tech
-          </p>
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/95 p-1 shadow-sm">
+            <Image
+              src={logoUrl}
+              alt=""
+              width={378}
+              height={142}
+              unoptimized
+              className="h-full w-full object-contain"
+            />
+          </span>
+          <div className="min-w-0">
+            <WordmarkLight className="block truncate text-sm" />
+            <p className="truncate text-[0.6rem] uppercase tracking-[0.15em] text-primary-300">
+              Learning &amp; Tech
+            </p>
+          </div>
         </div>
 
         <button

@@ -14,8 +14,8 @@ import {
   ASSIETTES,
   ASSIETTE_LABELS,
   MAX_REGLES_INITIALES,
-  MODES,
   MODE_LABELS,
+  MODES_PAR_ACTIVITE,
   PORTEES,
   PORTEE_DESCRIPTIONS,
   PORTEE_LABELS,
@@ -95,6 +95,15 @@ export function BaremeInitial({
     brouillon.activity === "FRAIS_FORMATION" || brouillon.activity === "FRAIS_INSCRIPTION";
   const surDocument = brouillon.activity === "VENTE_DOCUMENT";
   const surPrestation = brouillon.activity === "PRESTATION";
+
+  const modesDisponibles = MODES_PAR_ACTIVITE[brouillon.activity];
+
+  function changerActivite(nouvelle: Activite) {
+    modifier("activity", nouvelle);
+    if (!MODES_PAR_ACTIVITE[nouvelle].includes(brouillon.mode)) {
+      modifier("mode", MODES_PAR_ACTIVITE[nouvelle][0]);
+    }
+  }
 
   function ajouter() {
     const verdict = verifierBrouillon(brouillon);
@@ -196,7 +205,7 @@ export function BaremeInitial({
               <Select
                 id="bareme-activity"
                 value={brouillon.activity}
-                onChange={(event) => modifier("activity", event.target.value as Activite)}
+                onChange={(event) => changerActivite(event.target.value as Activite)}
               >
                 {ACTIVITES.map((valeur) => (
                   <option key={valeur} value={valeur}>
@@ -212,7 +221,7 @@ export function BaremeInitial({
                 value={brouillon.mode}
                 onChange={(event) => modifier("mode", event.target.value as Mode)}
               >
-                {MODES.map((valeur) => (
+                {modesDisponibles.map((valeur) => (
                   <option key={valeur} value={valeur}>
                     {MODE_LABELS[valeur]}
                   </option>
@@ -220,11 +229,15 @@ export function BaremeInitial({
               </Select>
             </Field>
 
-            {brouillon.mode === "POURCENTAGE" ? (
+            {brouillon.mode === "POURCENTAGE" || brouillon.mode === "MARGE" ? (
               <Field
-                label="Taux (%)"
+                label={brouillon.mode === "MARGE" ? "Part de la marge (%)" : "Taux (%)"}
                 htmlFor="bareme-rate"
-                hint="Part de chaque somme encaissée."
+                hint={
+                  brouillon.mode === "MARGE"
+                    ? "Part du bénéfice net (prix de vente − prix de revient) reversée."
+                    : "Part de chaque somme encaissée."
+                }
               >
                 <Input
                   id="bareme-rate"
@@ -428,7 +441,7 @@ function verifierBrouillon(regle: RegleBrouillon): string | null {
     return "Donnez un libellé à cette règle (au moins 3 caractères).";
   }
 
-  if (regle.mode === "POURCENTAGE") {
+  if (regle.mode === "POURCENTAGE" || regle.mode === "MARGE") {
     const taux = Number(regle.rate);
     if (!Number.isFinite(taux) || taux <= 0) return "Indiquez un taux supérieur à zéro.";
     if (taux > 100) return "Le taux ne peut pas dépasser 100 %.";
@@ -446,6 +459,10 @@ function verifierBrouillon(regle: RegleBrouillon): string | null {
 function decrire(regle: RegleBrouillon): string {
   if (regle.mode === "POURCENTAGE") {
     return `${formatNumber(Number(regle.rate) || 0)} % du montant encaissé`;
+  }
+
+  if (regle.mode === "MARGE") {
+    return `${formatNumber(Number(regle.rate) || 0)} % de la marge sur documents`;
   }
 
   const montant = formatMoney(Number(regle.fixedAmount) || 0);

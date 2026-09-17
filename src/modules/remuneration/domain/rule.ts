@@ -35,12 +35,21 @@ export const ACTIVITE_LABELS: Record<Activite, string> = {
   PRESTATION: "Prestation de service",
 };
 
-export const MODES = ["POURCENTAGE", "MONTANT_FIXE"] as const;
+export const MODES = ["POURCENTAGE", "MONTANT_FIXE", "MARGE"] as const;
 export type Mode = (typeof MODES)[number];
 
 export const MODE_LABELS: Record<Mode, string> = {
   POURCENTAGE: "Pourcentage du montant encaissé",
   MONTANT_FIXE: "Montant fixe",
+  MARGE: "Part de la marge sur documents vendus",
+};
+
+/** MARGE n'a de sens que pour des documents : ils sont seuls a porter un cout. */
+export const MODES_PAR_ACTIVITE: Record<Activite, readonly Mode[]> = {
+  FRAIS_INSCRIPTION: ["POURCENTAGE", "MONTANT_FIXE"],
+  FRAIS_FORMATION: ["POURCENTAGE", "MONTANT_FIXE"],
+  VENTE_DOCUMENT: ["POURCENTAGE", "MONTANT_FIXE", "MARGE"],
+  PRESTATION: ["POURCENTAGE", "MONTANT_FIXE"],
 };
 
 export const ASSIETTES = ["PAR_OPERATION", "PAR_ARTICLE"] as const;
@@ -157,6 +166,15 @@ export function validerRegleSansEmploye(
   }
   const mode = input.mode as Mode;
 
+  if (!MODES_PAR_ACTIVITE[activity].includes(mode)) {
+    return fail(
+      DomainError.businessRule(
+        `Le mode « ${MODE_LABELS[mode]} » ne s'applique pas à l'activité « ${ACTIVITE_LABELS[activity]} ».`,
+        "MODE_INCOMPATIBLE",
+      ),
+    );
+  }
+
   const portee = (input.portee ?? "MES_OPERATIONS") as Portee;
   if (!PORTEES.includes(portee)) {
     return fail(DomainError.validation("La portée est invalide.", "portee"));
@@ -170,7 +188,7 @@ export function validerRegleSansEmploye(
   let rate: number | null = null;
   let fixedAmount: number | null = null;
 
-  if (mode === "POURCENTAGE") {
+  if (mode === "POURCENTAGE" || mode === "MARGE") {
     rate = Number(input.rate);
     if (!Number.isFinite(rate) || rate <= 0) {
       return fail(DomainError.validation("Indiquez un taux supérieur à zéro.", "rate"));
@@ -342,6 +360,10 @@ export function decrireCalcul(
 ): string {
   if (regle.mode === "POURCENTAGE") {
     return `${(regle.rate ?? 0).toLocaleString("fr-FR")} % du montant encaissé`;
+  }
+
+  if (regle.mode === "MARGE") {
+    return `${(regle.rate ?? 0).toLocaleString("fr-FR")} % de la marge (prix de vente − prix de revient)`;
   }
 
   const montant = `${(regle.fixedAmount ?? 0).toLocaleString("fr-FR").replace(/ /g, " ")} FCFA`;

@@ -206,6 +206,7 @@ export async function listerOperations(
             select: {
               quantity: true,
               lineTotal: true,
+              unitCost: true,
               product: { select: { id: true, name: true, category: true } },
             },
           },
@@ -263,6 +264,7 @@ export async function listerOperations(
           category: ligne.product.category,
           quantity: ligne.quantity,
           amount: Number(ligne.lineTotal),
+          costAmount: ligne.unitCost === null ? null : Number(ligne.unitCost) * ligne.quantity,
         })),
       });
       continue;

@@ -649,6 +649,9 @@ enum ModeRemuneration {
   POURCENTAGE
   /// Somme forfaitaire (ex. 1 000 F), independante du montant.
   MONTANT_FIXE
+  /// Part de la marge nette (prix de vente - prix de revient) d'un document
+  /// vendu. Reserve a l'activite VENTE_DOCUMENT.
+  MARGE
 }
 
 /// Ce que compte un montant fixe.
@@ -752,6 +755,9 @@ model DocumentProduct {
   description String?
   imageUrl    String?          @map("image_url")
   price       Decimal          @db.Decimal(14, 2)
+  /// Cout du document (impression, materiel...) ; null si inconnu. Sert de
+  /// base a la commission sur marge (mode MARGE des regles de remuneration).
+  costPrice   Decimal?         @db.Decimal(14, 2) @map("cost_price")
   /// Stock courant ; null si le document est genere a la demande.
   stock       Int?
   alertStock  Int?             @map("alert_stock")
@@ -824,8 +830,12 @@ model DocumentSaleLine {
   product   DocumentProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   quantity  Int
-  unitPrice Decimal @db.Decimal(14, 2) @map("unit_price")
-  lineTotal Decimal @db.Decimal(14, 2) @map("line_total")
+  unitPrice Decimal  @db.Decimal(14, 2) @map("unit_price")
+  lineTotal Decimal  @db.Decimal(14, 2) @map("line_total")
+  /// Cout unitaire fige au moment de la vente (copie de DocumentProduct.costPrice) ;
+  /// null si le document n'avait pas de cout renseigne. Une commission sur
+  /// marge deja calculee ne doit jamais bouger si le cout change ensuite.
+  unitCost  Decimal? @db.Decimal(14, 2) @map("unit_cost")
 
   @@index([saleId])
   @@map("document_sale_lines")

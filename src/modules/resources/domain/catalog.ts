@@ -701,6 +701,10 @@ export const RESOURCES: readonly ResourceDefinition[] = [
       { name: "description", label: "Description", kind: "textarea" },
       amount("price", "Prix", true, true),
       {
+        ...amount("costPrice", "Prix de revient", false, false),
+        hint: "Coût de production (impression, matériel...). Sert de base à la commission sur marge, si un employé en a une.",
+      },
+      {
         name: "stock",
         label: "Stock",
         kind: "integer",
@@ -958,6 +962,7 @@ export const RESOURCES: readonly ResourceDefinition[] = [
         inList: true,
         filterable: true,
         relation: STUDENT,
+        quickCreate: "apprenants",
       },
       {
         name: "trainingId",
